@@ -15,7 +15,7 @@ You are responsible for obeying all applicable laws. The author(s) assume no lia
 Edit your /etc/pwnagotchi/config.toml to look like this:
 ```
 main.custom_plugin_repos = [
-    "https://github.com/jayofelony/pwnagotchi-torch-plugins/archive/master.zip",
+    "https://github.com/Talaxin/pwnagotchi-btsniffer/archive/master.zip",
 ]
 ```
 Then run this command:
