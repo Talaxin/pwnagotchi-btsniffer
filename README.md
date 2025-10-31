@@ -58,3 +58,7 @@ main.plugins.btsniffer.path = "/root/handshakes/toupload"
 main.plugins.btsniffer.wigle_name = ""
 main.plugins.btsniffer.wigle_api_token = ""
 main.plugins.btsniffer.remove_on_success = true
+```
+## Finally restart pwnagotchi
+```
+sudo systemctl restart pwnagotchi
