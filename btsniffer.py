@@ -23,9 +23,8 @@ class btsniffer(plugins.Plugin):
     Combined btsniffer + CSV-only HandshakeUploader (uploads .csv files).
     GPSD Required. Produces WiGLE CSV compatible output.
     """
-
     __author__ = 'diytechtinker, fixed by Jayofelony, enhanced by Talaxin'
-    __version__ = '0.5.1'
+    __version__ = '0.5.2'
     __license__ = 'GPL3'
     __description__ = ('Sniffs Bluetooth devices, logs WiGLE-compatible CSV with GPSD '
                        'support and a CSV-only uploader integrated (uploads when internet available).')
@@ -34,35 +33,38 @@ class btsniffer(plugins.Plugin):
         # btsniffer options
         self.options = {
             'timer': 45,  # Time to wait between scans
-            'scan_duration': 10, # How long to scan for, should be higher in dense areas/traveling fast
-            'devices_file': '/root/handshakes/bluetooth_devices.csv', # Where to store and what to call the bt-device csv file
-            'file_size': 15000,  # 15KB, How large to make the file before uploading. larger file = longer upload intervals 
+            'scan_duration': 10,  # How long to scan for, should be higher in dense areas/traveling fast
+            'devices_file': '/root/handshakes/bluetooth_devices.csv',  # Where to store and what to call the bt-device csv file
+            'file_size': 15000,  # 15KB, How large to make the file before uploading. larger file = longer upload intervals
             'bt_x_coord': 160,
             'bt_y_coord': 66,
             'gps_host': '127.0.0.1',
             'gps_port': 2947,
-            'blacklist':[
-                "AA:BB:CC:DD:EE:FF", # Ignore these BT mac addrs
+            'upload_check_interval': 300,  # Check for uploads every 5 minutes
+            'blacklist': [
+                "AA:BB:CC:DD:EE:FF",  # Ignore these BT mac addrs
                 "11:22:33:44:55:66",
             ]
         }
 
         # HandshakeUploader options
         self.uploader_options = {
-            'path': '/root/handshakes/toupload/', # Where to upload files from
-            'remove_on_success': True, # Should it delete the file after uploaded to wigle
-            'wigle_name': '', # Wigle username
-            'wigle_api_token': '', # Wigle API token
+            'path': '/root/handshakes/toupload/',  # Where to upload files from
+            'remove_on_success': True,  # Should it delete the file after uploaded to wigle
+            'wigle_name': '',  # Wigle username
+            'wigle_api_token': '',  # Wigle API token
         }
 
         self.data = {}
         self.last_scan_time = 0
+        self._last_upload_check = 0
         self._uploader_lock = threading.Lock()
         self._uploading = False
 
     # ---------------- lifecycle ----------------
     def on_loaded(self):
         logging.info("[BT-Sniffer] btsniffer plugin loading...")
+
         try:
             cfg_blacklist = self.options.get('blacklist', [])
             self.options['blacklist'] = [m.upper() for m in cfg_blacklist]
@@ -92,8 +94,6 @@ class btsniffer(plugins.Plugin):
             logging.info(f"[BT-Sniffer] WiGLE API configured for user: {self.uploader_options['wigle_name']}")
         else:
             logging.warning("[BT-Sniffer] WiGLE credentials not configured - uploads will be skipped")
-    
-
 
     def on_ui_setup(self, ui):
         with ui._lock:
@@ -108,6 +108,8 @@ class btsniffer(plugins.Plugin):
 
     def on_ui_update(self, ui):
         now = time.time()
+        
+        # Regular scanning
         if now - self.last_scan_time >= int(self.options.get('timer', 45)):
             self.last_scan_time = now
             ui.set('BT-Sniffer', str(self.bt_sniff_info()))
@@ -115,6 +117,20 @@ class btsniffer(plugins.Plugin):
                 self.scan(ui)
             except Exception as e:
                 logging.exception(f"[BT-Sniffer] Exception during scan: {e}")
+        
+        # Periodic upload check - NEW!
+        upload_interval = int(self.options.get('upload_check_interval', 300))
+        if now - self._last_upload_check >= upload_interval:
+            self._last_upload_check = now
+            pending_files = self._list_csv_files()
+            if pending_files:
+                logging.info(f"[BT-Sniffer] Periodic check: {len(pending_files)} file(s) pending upload")
+                if self._check_internet():
+                    logging.info("[BT-Sniffer] Internet available, triggering upload...")
+                    t = threading.Thread(target=self._upload_all, daemon=True)
+                    t.start()
+                else:
+                    logging.debug("[BT-Sniffer] No internet connection, will retry later")
 
     # ---------------- CSV Header ----------------
     def write_csv_header(self):
@@ -147,6 +163,7 @@ class btsniffer(plugins.Plugin):
                 s.settimeout(3.0)
                 s.connect((host, port))
                 s.sendall(b'?WATCH={"enable":true,"json":true}\n')
+
                 buf = ""
                 end = time.time() + 2.5
                 while time.time() < end:
@@ -154,6 +171,7 @@ class btsniffer(plugins.Plugin):
                     if not chunk:
                         break
                     buf += chunk
+
                     while '\n' in buf:
                         line, buf = buf.split('\n', 1)
                         try:
@@ -176,6 +194,7 @@ class btsniffer(plugins.Plugin):
             alt = float(gps_data.get('altMSL', gps_data.get('alt', 0.0) or 0.0))
             acc = float(gps_data.get('epx', gps_data.get('eps', 0.0) or 0.0))
             return lat, lon, alt, acc
+
         return 0.0, 0.0, 0.0, 0.0
 
     # ---------------- Bluetooth Scan ----------------
@@ -188,17 +207,16 @@ class btsniffer(plugins.Plugin):
 
         try:
             subprocess.run("bluetoothctl scan on &", shell=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             time.sleep(scan_duration)
             subprocess.run("bluetoothctl scan off", shell=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception as e:
             logging.debug(f"[BT-Sniffer] Error controlling bluetoothctl: {e}")
 
         try:
             output = subprocess.check_output(
-                "bluetoothctl devices",
-                shell=True
+                "bluetoothctl devices", shell=True
             ).decode(errors='ignore')
         except subprocess.CalledProcessError:
             output = ""
@@ -212,9 +230,11 @@ class btsniffer(plugins.Plugin):
         for line in output.strip().splitlines():
             if "Device " not in line:
                 continue
+
             parts = line.strip().split(" ", 2)
             if len(parts) < 2:
                 continue
+
             mac = parts[1].upper()
             name = parts[2].strip() if len(parts) > 2 else ""
 
@@ -238,9 +258,20 @@ class btsniffer(plugins.Plugin):
                 with open(self.options['devices_file'], 'a', newline='') as csvfile:
                     writer = csv.writer(csvfile)
                     writer.writerow([
-                        mac, name, f"Misc [{devtype}]", self.data[mac]['first_seen'],
-                        0, 0, rssi, f"{lat:.9f}", f"{lon:.9f}",
-                        f"{alt:.1f}", f"{acc:.6f}", '', mfgr, devtype
+                        mac,
+                        name,
+                        f"Misc [{devtype}]",
+                        self.data[mac]['first_seen'],
+                        0,
+                        0,
+                        rssi,
+                        f"{lat:.9f}",
+                        f"{lon:.9f}",
+                        f"{alt:.1f}",
+                        f"{acc:.6f}",
+                        '',
+                        mfgr,
+                        devtype
                     ])
                     rows_written += 1
             except Exception as e:
@@ -310,12 +341,21 @@ class btsniffer(plugins.Plugin):
         except Exception as e:
             logging.error(f"[BT-Sniffer] Rollover error: {e}")
 
+    # ---------------- Internet Check ----------------
+    def _check_internet(self):
+        """Quick check if internet is available"""
+        try:
+            response = requests.get('https://api.wigle.net', timeout=5)
+            return response.status_code == 200
+        except Exception:
+            return False
+
     # ---------------- Uploader ----------------
     def _list_csv_files(self):
         path = self.uploader_options['path']
         try:
             files = [os.path.join(path, f) for f in os.listdir(path)
-                     if f.lower().endswith('.csv') and os.path.isfile(os.path.join(path, f))]
+                    if f.lower().endswith('.csv') and os.path.isfile(os.path.join(path, f))]
             files.sort(key=lambda f: os.path.getmtime(f))
             return files
         except Exception:
@@ -336,6 +376,7 @@ class btsniffer(plugins.Plugin):
         try:
             auth = (username, token)
             logging.info(f"[BT-Sniffer] Uploading {file_path} to WiGLE...")
+
             with open(file_path, "rb") as fp:
                 files = {"file": fp}
                 response = requests.post(url, files=files, auth=auth, timeout=120)
@@ -347,6 +388,7 @@ class btsniffer(plugins.Plugin):
                         logging.info(f"[BT-Sniffer] WiGLE upload successful: {file_path}")
                         if self.uploader_options.get('remove_on_success', True):
                             os.remove(file_path)
+                            logging.info(f"[BT-Sniffer] Deleted uploaded file: {file_path}")
                         return True
                     else:
                         logging.warning(f"[BT-Sniffer] WiGLE upload failed: {resp_json}")
@@ -360,17 +402,26 @@ class btsniffer(plugins.Plugin):
 
         return False
 
-
     def _upload_all(self):
         if self._uploader_lock.locked():
+            logging.debug("[BT-Sniffer] Upload already in progress, skipping")
             return
+
         with self._uploader_lock:
-            for f in self._list_csv_files():
+            files = self._list_csv_files()
+            if not files:
+                logging.debug("[BT-Sniffer] No files to upload")
+                return
+
+            logging.info(f"[BT-Sniffer] Starting upload of {len(files)} file(s)...")
+            for f in files:
                 self._upload_file(f)
                 time.sleep(1)
+            logging.info("[BT-Sniffer] Upload batch complete")
 
     def on_internet_available(self, agent):
-        logging.info("[BT-Sniffer] Internet detected, uploading files...")
+        """Called by Pwnagotchi when internet becomes available"""
+        logging.info("[BT-Sniffer] Internet detected (on_internet_available), uploading files...")
         t = threading.Thread(target=self._upload_all, daemon=True)
         t.start()
 
