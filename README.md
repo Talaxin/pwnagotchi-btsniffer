@@ -4,40 +4,57 @@ pwnagotchi bluetooth device sniffer and wigle.net csv maker and uploader
 ## Ethical Use Notice
 This project is provided for educational, research, and personal lawful use only.
 
-Do not use this software for any activity that violates privacy, breaks local laws, or harms networks or devices you do not own or have permission to test.
+Do not use this software for any activity that violates privacy, breaks local laws, or harms networks or devices you do not own or have explicit permission to test.
 
 You are responsible for obeying all applicable laws. The author(s) assume no liability for misuse.
 
 
-## CONFIG.TOML
 
-### Enable Plugin
-main.plugins.bluetoothsniffer.enabled = true
+## Custom plugin repository
 
-### Scan controls
-main.plugins.bluetoothsniffer.timer = 45                      # Seconds between each BT scan
-main.plugins.bluetoothsniffer.scan_duration = 10              # How long each scan runs (sec)
-main.plugins.bluetoothsniffer.file_size = 15000               # CSV rollover size in bytes (15KB default)
+Edit your /etc/pwnagotchi/config.toml to look like this:
+```
+main.custom_plugin_repos = [
+    "https://github.com/jayofelony/pwnagotchi-torch-plugins/archive/master.zip",
+]
+```
+Then run this command:
+```
+sudo pwnagotchi plugins update
+```
+## Install Bluetooth Sniffer Plugin
+```
+sudo pwnagotchi plugins install btsniffer
+```
+Add the following to /etc/pwnagotchi/config.toml
+```toml
+# Enable Plugin
+main.plugins.btsniffer.enabled = true
 
-### Files & logging
-main.plugins.bluetoothsniffer.devices_file = "/root/handshakes/bluetooth_devices.csv"  # Live BT capture log file
+# Scan controls
+main.plugins.btsniffer.timer = 45
+main.plugins.btsniffer.scan_duration = 10
+main.plugins.btsniffer.file_size = 15000
 
-### UI placement on screen
-main.plugins.bluetoothsniffer.bt_x_coord = 160
-main.plugins.bluetoothsniffer.bt_y_coord = 66
+# Files & logging
+main.plugins.btsniffer.devices_file = "/root/handshakes/bluetooth_devices.csv"
 
-### GPS configuration
-main.plugins.bluetoothsniffer.gps_host = "127.0.0.1"          # GPSD host
-main.plugins.bluetoothsniffer.gps_port = 2947                 # GPSD port
+# UI placement on screen
+main.plugins.btsniffer.bt_x_coord = 160
+main.plugins.btsniffer.bt_y_coord = 66
 
-### Ignore known devices (do not log or upload these MACs)
-main.plugins.bluetoothsniffer.blacklist = [
+# GPS configuration
+main.plugins.btsniffer.gps_host = "127.0.0.1"
+main.plugins.btsniffer.gps_port = 2947
+
+# Ignore known devices (do not log these MACs)
+main.plugins.btsniffer.blacklist = [
  "AA:BB:CC:DD:EE:FF",
  "11:22:33:44:55:66",
 ]
 
-### Upload settings
-main.plugins.bluetoothsniffer.path = "/root/handshakes/toupload"   # Folder where finished CSVs go
-main.plugins.bluetoothsniffer.wigle_name = ""                      # Your WiGLE username
-main.plugins.bluetoothsniffer.wigle_api_token = ""                 # WiGLE API token
-main.plugins.bluetoothsniffer.remove_on_success = true             # Delete CSV after successful upload
+# Upload settings
+main.plugins.btsniffer.path = "/root/handshakes/toupload"
+main.plugins.btsniffer.wigle_name = ""
+main.plugins.btsniffer.wigle_api_token = ""
+main.plugins.btsniffer.remove_on_success = true
