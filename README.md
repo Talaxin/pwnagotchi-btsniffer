@@ -34,7 +34,7 @@ main.plugins.btsniffer.enabled = true
 # Scan controls
 main.plugins.btsniffer.timer = 45
 main.plugins.btsniffer.scan_duration = 10
-main.plugins.btsniffer.file_size = 15000
+main.plugins.btsniffer.file_size = 15000 #bytes
 
 # Files & logging
 main.plugins.btsniffer.devices_file = "/root/handshakes/bluetooth_devices.csv"
