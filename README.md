@@ -55,8 +55,8 @@ main.plugins.btsniffer.blacklist = [
 
 # Upload settings
 main.plugins.btsniffer.path = "/root/handshakes/toupload"
-main.plugins.btsniffer.wigle_name = ""
-main.plugins.btsniffer.wigle_api_token = ""
+main.plugins.btsniffer.wigle_name = "YOUR_API_NAME"
+main.plugins.btsniffer.wigle_api_token = "YOUR_API_TOKEN"
 main.plugins.btsniffer.remove_on_success = true
 
 # Periodic file upload check (in seconds)
