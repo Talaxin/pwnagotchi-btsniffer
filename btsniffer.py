@@ -23,7 +23,7 @@ class btsniffer(plugins.Plugin):
     Combined btsniffer + CSV-only HandshakeUploader (uploads .csv files).
     GPSD Required. Produces WiGLE CSV compatible output.
     """
-    __author__ = 'diytechtinker, fixed by Jayofelony, enhanced by Talaxin'
+    __author__ = 'diytechtinker, fixed by Jayofelony, updated and enhanced by Talaxin'
     __version__ = '0.5.2'
     __license__ = 'GPL3'
     __description__ = ('Sniffs Bluetooth devices, logs WiGLE-compatible CSV with GPSD '
