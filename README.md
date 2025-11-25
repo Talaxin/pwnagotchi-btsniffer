@@ -1,4 +1,4 @@
-# pwnagotchi-btsniffer
+# pwnagotchi-btsniffer/wigle.net
 pwnagotchi bluetooth device sniffer and wigle.net csv maker and uploader
 
 ## Ethical Use Notice
