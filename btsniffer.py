@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import logging
 import os
 import subprocess
@@ -23,6 +24,7 @@ class btsniffer(plugins.Plugin):
     Combined btsniffer + CSV-only HandshakeUploader (uploads .csv files).
     GPSD Required. Produces WiGLE CSV compatible output.
     """
+
     __author__ = 'diytechtinker, fixed by Jayofelony, updated and enhanced by Talaxin'
     __version__ = '0.5.2'
     __license__ = 'GPL3'
@@ -50,7 +52,8 @@ class btsniffer(plugins.Plugin):
         # HandshakeUploader options
         self.uploader_options = {
             'path': '/root/handshakes/toupload/',  # Where to upload files from
-            'remove_on_success': True,  # Should it delete the file after uploaded to wigle
+            'uploaded_path': '/root/handshakes/uploaded/',  # Where to move files after successful upload
+            'remove_on_success': True,  # Should it delete the file after uploaded to wigle (from uploaded_path)
             'wigle_name': '',  # Wigle username
             'wigle_api_token': '',  # Wigle API token
         }
@@ -75,6 +78,7 @@ class btsniffer(plugins.Plugin):
         self.uploader_options['wigle_name'] = self.options.get('wigle_name', '')
         self.uploader_options['wigle_api_token'] = self.options.get('wigle_api_token', '')
         self.uploader_options['remove_on_success'] = self.options.get('remove_on_success', True)
+        self.uploader_options['uploaded_path'] = self.options.get('uploaded_path', '/root/handshakes/uploaded/')
 
         # Ensure directories
         os.makedirs(
@@ -82,12 +86,17 @@ class btsniffer(plugins.Plugin):
             exist_ok=True
         )
         os.makedirs(self.uploader_options['path'], exist_ok=True)
+        os.makedirs(self.uploader_options['uploaded_path'], exist_ok=True)
 
         if not os.path.exists(self.options['devices_file']):
             self.write_csv_header()
+        else:
+            # Load already-logged devices from existing CSV to prevent duplicates
+            self._load_existing_devices()
 
         logging.info(f"[BT-Sniffer] Output CSV: {self.options['devices_file']}")
         logging.info(f"[BT-Sniffer] Blacklist: {', '.join(self.options['blacklist']) or '(none)'}")
+        logging.info(f"[BT-Sniffer] Already tracking {len(self.data)} device(s) from existing CSV")
 
         # Log if WiGLE credentials are configured
         if self.uploader_options['wigle_name'] and self.uploader_options['wigle_api_token']:
@@ -151,6 +160,41 @@ class btsniffer(plugins.Plugin):
                 writer.writerow(header)
         except Exception as e:
             logging.error(f"[BT-Sniffer] Unable to write CSV header: {e}")
+
+    def _load_existing_devices(self):
+        """Load MAC addresses from existing CSV file to prevent duplicate logging"""
+        file_path = self.options['devices_file']
+        try:
+            with open(file_path, 'r', newline='') as csvfile:
+                # Read first line to check for pre-header
+                first_line = csvfile.readline()
+                csvfile.seek(0)  # Reset to beginning
+                
+                reader = csv.reader(csvfile)
+                
+                # Skip pre-header line if present (WigleWifi-1.6...)
+                if first_line.startswith('WigleWifi'):
+                    next(reader, None)
+                
+                # Skip header row (MAC, SSID, etc.)
+                header = next(reader, None)
+                if not header or header[0] != 'MAC':
+                    # No valid header found, can't parse
+                    return
+                
+                # Read all data rows and extract MAC addresses
+                for row in reader:
+                    if len(row) > 0:
+                        mac = row[0].strip().upper()
+                        if mac and mac != 'MAC':  # Skip header if present
+                            # Store with first_seen from CSV if available
+                            if mac not in self.data:
+                                first_seen = row[3] if len(row) > 3 else datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+                                self.data[mac] = {'first_seen': first_seen}
+        except Exception as e:
+            logging.warning(f"[BT-Sniffer] Could not load existing devices from CSV: {e}")
+            # If we can't read the file, start fresh
+            self.data = {}
 
     # ---------------- GPSD ----------------
     def get_gps_coords(self):
@@ -386,9 +430,24 @@ class btsniffer(plugins.Plugin):
                     resp_json = response.json()
                     if resp_json.get("success"):
                         logging.info(f"[BT-Sniffer] WiGLE upload successful: {file_path}")
-                        if self.uploader_options.get('remove_on_success', True):
-                            os.remove(file_path)
-                            logging.info(f"[BT-Sniffer] Deleted uploaded file: {file_path}")
+                        
+                        # Move file to uploaded directory
+                        uploaded_dir = self.uploader_options.get('uploaded_path', '/root/handshakes/uploaded/')
+                        os.makedirs(uploaded_dir, exist_ok=True)
+                        file_name = os.path.basename(file_path)
+                        uploaded_file_path = os.path.join(uploaded_dir, file_name)
+                        
+                        try:
+                            shutil.move(file_path, uploaded_file_path)
+                            logging.info(f"[BT-Sniffer] Moved uploaded file to: {uploaded_file_path}")
+                            
+                            # Delete from uploaded directory if remove_on_success is True
+                            if self.uploader_options.get('remove_on_success', True):
+                                os.remove(uploaded_file_path)
+                                logging.info(f"[BT-Sniffer] Deleted uploaded file: {uploaded_file_path}")
+                        except Exception as move_error:
+                            logging.error(f"[BT-Sniffer] Error moving file to uploaded directory: {move_error}")
+                        
                         return True
                     else:
                         logging.warning(f"[BT-Sniffer] WiGLE upload failed: {resp_json}")
